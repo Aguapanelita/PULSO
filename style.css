@@ -1,9 +1,3 @@
-/**
- * PULSO — style.css
- * Identidad visual: Glassmorphism de alta definición, formas 3D de cristal y tonos análogos al violeta.
- * Paleta: Violeta profundo, magenta, fucsia, orquídea, índigo y acentos de cristal reflectante.
- */
-
 :root {
   color-scheme: dark;
   --bg-deep: #070312;
@@ -20,8 +14,7 @@
   --border-glass: rgba(255, 255, 255, 0.22);
   --border-violet: rgba(168, 85, 247, 0.45);
 
-  /* Tonos análogos al violeta */
-  --accent-violet: #a855f7;
+   --accent-violet: #a855f7;
   --accent-purple: #8b3dfc;
   --accent-magenta: #d946ef;
   --accent-fuchsia: #e879f9;
@@ -58,7 +51,6 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Fondo con ondas y resplandor análogo al violeta (estilo Mockup 2) */
 body::before {
   content: '';
   position: fixed;
@@ -72,7 +64,6 @@ body::before {
   z-index: 0;
 }
 
-/* Grano sutil */
 .grain-overlay {
   position: fixed;
   inset: 0;
@@ -83,7 +74,6 @@ body::before {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
 }
 
-/* Viewport 3D global persistente */
 .viewport-3d {
   position: fixed;
   inset: 0;
@@ -97,7 +87,6 @@ body.in-result .viewport-3d {
   pointer-events: auto;
 }
 
-/* Contenedor general de pantallas */
 .screen-view {
   position: absolute;
   inset: 0;
@@ -119,7 +108,6 @@ body.in-result .viewport-3d {
   pointer-events: auto;
 }
 
-/* Tipografía y Títulos Extravagantes en Montserrat ExtraBold */
 h1, h2, h3, h4 {
   font-family: var(--font-title);
   font-weight: 800;
@@ -134,7 +122,6 @@ button {
   transition: var(--transition);
 }
 
-/* Botones con estilo Glassmorphic y píldoras ("globos") */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -235,7 +222,6 @@ button {
   overflow: hidden;
 }
 
-/* Barra de ventana tipo mockup (como en las imágenes de referencia) */
 .glass-window-bar {
   display: flex;
   align-items: center;
@@ -861,9 +847,6 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 0 12px rgba(217, 70, 239, 0.35);
 }
 
-/* ========================================================
-   MODAL DE EXPORTACIÓN (GLASSMORPHISM)
-   ======================================================== */
 .modal-backdrop {
   position: fixed;
   inset: 0;
