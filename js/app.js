@@ -69,6 +69,7 @@ class PulsoApp {
     this.timeDisplay = document.getElementById('time-display');
     this.btnLoop = document.getElementById('btn-loop');
     this.btnAutoRotate = document.getElementById('btn-autorotate');
+    this.btnResetView = document.getElementById('btn-reset-view');
     this.btnTogglePip = document.getElementById('btn-toggle-pip');
     this.pipContainer = document.getElementById('pip-container');
     this.pipVideo = document.getElementById('pip-video');
@@ -156,11 +157,7 @@ class PulsoApp {
     // Cancelar análisis
     this.btnCancelAnalysis.addEventListener('click', () => {
       this.analyzer.abort();
-      if (this.sculpture) {
-        this.sculpture.clear();
-        this.sculpture.setAmbientVisible(true);
-      }
-      this.showScreen('intro');
+      this.returnToStart();
       this.showToast('Análisis cancelado.');
     });
 
@@ -192,18 +189,18 @@ class PulsoApp {
       }
     });
 
+    this.btnResetView.addEventListener('click', () => {
+      if (this.sculpture) this.sculpture.resetView();
+      this.btnAutoRotate.classList.remove('active');
+    });
+
     this.btnTogglePip.addEventListener('click', () => {
       const isHidden = this.pipContainer.classList.toggle('hidden');
       this.btnTogglePip.classList.toggle('active', !isHidden);
     });
 
     this.btnReset.addEventListener('click', () => {
-      if (this.timeline) this.timeline.pause();
-      if (this.sculpture) {
-        this.sculpture.clear();
-        this.sculpture.setAmbientVisible(true);
-      }
-      this.showScreen('intro');
+      this.returnToStart();
     });
 
     // Modal de Exportación
@@ -228,18 +225,31 @@ class PulsoApp {
     });
   }
 
-  async handleSelectedFile(file) {
+  async handleSelectedFile(file, { fromDemo = false } = {}) {
+    if (!fromDemo && this.btnDemoVideo.disabled) {
+      this._demoRunId = (this._demoRunId || 0) + 1;
+      VideoAnalyzer.cancelSyntheticVideo();
+      this.btnDemoVideo.disabled = false;
+      this.btnDemoVideo.textContent = 'Probar con video de ejemplo';
+    }
     const validation = VideoAnalyzer.validateFile(file);
     if (!validation.valid) {
       this.showToast(validation.error, 4000);
       return;
     }
 
-    this.currentVideoFile = file;
+    const loadId = this._loadRunId = (this._loadRunId || 0) + 1;
     this.showToast('Cargando video...', 1500);
 
     try {
       const loaded = await this.analyzer.loadVideo(file);
+      if (loadId !== this._loadRunId) {
+        URL.revokeObjectURL(loaded.url);
+        return;
+      }
+      if (this.videoUrl && this.videoUrl !== loaded.url) URL.revokeObjectURL(this.videoUrl);
+      this.videoUrl = loaded.url;
+      this.currentVideoFile = file;
       this.videoElement = loaded.video;
       this.videoDuration = loaded.duration;
 
@@ -247,23 +257,85 @@ class PulsoApp {
       this.introVideoInfo.textContent = `${file.name} · ${loaded.width}×${loaded.height} px · ${loaded.duration.toFixed(1)} s`;
       this.previewSection.classList.remove('hidden');
     } catch (err) {
+      if (loadId !== this._loadRunId) return;
       this.showToast(err.message, 4000);
     }
   }
 
   async handleDemoVideo() {
+    if (this.btnDemoVideo.disabled) return;
+    this.btnDemoVideo.disabled = true;
+    this.btnDemoVideo.textContent = 'Generando video…';
+    const demoId = this._demoRunId = (this._demoRunId || 0) + 1;
     this.showToast('Generando escena sintética de prueba...', 2000);
     try {
       const blob = await VideoAnalyzer.generateSyntheticVideoBlob(7);
-      blob.name = 'escena_sintetica_pulso.webm';
-      this.handleSelectedFile(blob);
+      if (demoId !== this._demoRunId) return;
+      const extension = blob.type.includes('mp4') ? 'mp4' : 'webm';
+      const file = new File([blob], `escena_sintetica_pulso.${extension}`, { type: blob.type || 'video/webm' });
+      await this.handleSelectedFile(file, { fromDemo: true });
     } catch (err) {
+      if (demoId !== this._demoRunId) return;
       this.showToast('Error generando escena de prueba: ' + err.message, 4000);
+    } finally {
+      if (demoId === this._demoRunId) {
+        this.btnDemoVideo.disabled = false;
+        this.btnDemoVideo.textContent = 'Probar con video de ejemplo';
+      }
     }
   }
 
+  returnToStart() {
+    this._analysisRunId = (this._analysisRunId || 0) + 1;
+    this._loadRunId = (this._loadRunId || 0) + 1;
+    this._demoRunId = (this._demoRunId || 0) + 1;
+    VideoAnalyzer.cancelSyntheticVideo();
+    this.analyzer.abort();
+    this.timeline?.dispose();
+    this.timeline = null;
+    this.synthesizer.stop();
+    if (this.sculpture) {
+      this.sculpture.clear();
+      this.sculpture.resetView();
+      this.sculpture.setAmbientVisible(true);
+    }
+    [this.introVideoPreview, this.procVideoPreview, this.pipVideo].forEach(video => {
+      if (!video) return;
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+    });
+    if (this.videoUrl) {
+      URL.revokeObjectURL(this.videoUrl);
+      this.videoUrl = null;
+    }
+    this.fileInput.value = '';
+    this.btnDemoVideo.disabled = false;
+    this.btnDemoVideo.textContent = 'Probar con video de ejemplo';
+    this.previewSection.classList.add('hidden');
+    this.procProgressBar.style.width = '0%';
+    this.procProgressText.textContent = '0%';
+    this.procStatusText.textContent = 'Extrayendo fotogramas...';
+    this.procMotionVal.textContent = '0%';
+    this.procBrightVal.textContent = '0%';
+    this.procContrastVal.textContent = '0%';
+    this.procColorPalette.innerHTML = '';
+    this.analysisData = null;
+    this.musicScore = null;
+    this.renderedAudioBuffer = null;
+    this.currentVideoFile = null;
+    this.videoElement = null;
+    this.btnAutoRotate.classList.remove('active');
+    this._analysisRunning = false;
+    this.btnStartAnalysis.disabled = false;
+    this.showScreen('intro');
+  }
+
   async startAnalysis() {
-    if (!this.videoElement) return;
+    if (!this.videoElement || this._analysisRunning) return;
+    const runId = this._analysisRunId = (this._analysisRunId || 0) + 1;
+    this._analysisRunning = true;
+    this.btnStartAnalysis.disabled = true;
 
     this.showScreen('processing');
     this.procVideoPreview.src = this.introVideoPreview.src;
@@ -287,6 +359,7 @@ class PulsoApp {
         // Actualizar muestra de color
         this._updatePaletteDisplay([metrics.dominantColor]);
       });
+      if (runId !== this._analysisRunId) return;
 
       this.analysisData = result;
       this.procStatusText.textContent = 'Traduciendo datos a partitura musical...';
@@ -320,8 +393,9 @@ class PulsoApp {
       this.resultInfo.textContent = `${this.musicScore.modeName} · ${this.musicScore.totalNotes} notas · ${this.musicScore.duration.toFixed(1)} s`;
 
       // 6. Pre-renderizar audio offline en segundo plano para exportación inmediata
-      this.synthesizer.renderOffline(this.musicScore).then(buf => {
-        this.renderedAudioBuffer = buf;
+      const scoreForRender = this.musicScore;
+      this.synthesizer.renderOffline(scoreForRender).then(buf => {
+        if (this.musicScore === scoreForRender) this.renderedAudioBuffer = buf;
       }).catch(err => console.warn('Pre-render audio falló:', err));
 
       // Transición a pantalla de resultado
@@ -330,9 +404,15 @@ class PulsoApp {
       this.showToast('Composición y escultura generadas con éxito.');
 
     } catch (err) {
+      if (runId !== this._analysisRunId) return;
       if (err.message.includes('cancelado')) return;
       this.showToast('Error en el análisis: ' + err.message, 4000);
       this.showScreen('intro');
+    } finally {
+      if (runId === this._analysisRunId) {
+        this._analysisRunning = false;
+        this.btnStartAnalysis.disabled = false;
+      }
     }
   }
 
@@ -408,6 +488,7 @@ class PulsoApp {
     try {
       this.btnExportGlb.disabled = true;
       this.showToast('Generando modelo 3D GLB...', 2000);
+      this.sculpture.prepareForExport();
       await MediaExporter.exportGLB(this.sculpture.sculptureGroup, 'pulso_escultura');
       this.showToast('Descargando modelo GLB...');
     } catch (err) {

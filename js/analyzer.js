@@ -11,6 +11,7 @@ export class VideoAnalyzer {
     this.downscaleWidth = options.downscaleWidth || 128;
     this.downscaleHeight = options.downscaleHeight || 72;
     this.aborted = false;
+    this._analysisRunId = 0;
   }
 
   /**
@@ -33,8 +34,15 @@ export class VideoAnalyzer {
     return { valid: true };
   }
 
+  static cancelSyntheticVideo() {
+    this._cancelSyntheticVideo?.();
+  }
+
   abort() {
     this.aborted = true;
+    this._analysisRunId++;
+    this._abortCurrent?.();
+    this._abortCurrent = null;
   }
 
   /**
@@ -78,7 +86,11 @@ export class VideoAnalyzer {
    * @returns {Promise<AnalysisData>}
    */
   async analyze(video, onProgress = () => {}) {
+    const runId = ++this._analysisRunId;
     this.aborted = false;
+    let resolveAbort;
+    const cancelled = new Promise(resolve => { resolveAbort = resolve; });
+    this._abortCurrent = resolveAbort;
     const duration = video.duration || 5;
     const targetSamples = Math.min(this.maxSamples, Math.max(12, Math.round(duration * this.sampleRate)));
     const timeStep = duration / targetSamples;
@@ -92,12 +104,17 @@ export class VideoAnalyzer {
     let prevLuma = null;
 
     for (let i = 0; i < targetSamples; i++) {
-      if (this.aborted) {
+      if (this.aborted || runId !== this._analysisRunId) {
         throw new Error('Análisis cancelado por el usuario.');
       }
 
       const targetTime = Math.min(duration - 0.05, i * timeStep);
-      await this._seekVideo(video, targetTime);
+      const seekCompleted = await Promise.race([
+        this._seekVideo(video, targetTime).then(() => true), cancelled
+      ]);
+      if (!seekCompleted || this.aborted || runId !== this._analysisRunId) {
+        throw new Error('Análisis cancelado por el usuario.');
+      }
 
       ctx.drawImage(video, 0, 0, this.downscaleWidth, this.downscaleHeight);
       const imgData = ctx.getImageData(0, 0, this.downscaleWidth, this.downscaleHeight);
@@ -127,6 +144,7 @@ export class VideoAnalyzer {
     const processed = this._postProcessSamples(samples, duration);
     processed.width = video.videoWidth || 1;
     processed.height = video.videoHeight || 1;
+    if (runId === this._analysisRunId) this._abortCurrent = null;
     return processed;
   }
 
@@ -331,11 +349,16 @@ export class VideoAnalyzer {
    * sin requerir que el usuario posea un archivo de video al probar.
    */
   static generateSyntheticVideoBlob(durationSeconds = 6) {
-    return new Promise((resolve) => {
+    this.cancelSyntheticVideo();
+    return new Promise((resolve, reject) => {
       const canvas = document.createElement('canvas');
       canvas.width = 640;
       canvas.height = 360;
       const ctx = canvas.getContext('2d');
+
+      if (!canvas.captureStream || typeof MediaRecorder === 'undefined') {
+        throw new Error('Este navegador no permite crear el video de ejemplo. Prueba con un archivo de video.');
+      }
 
       const stream = canvas.captureStream(30);
       let mimeType = 'video/webm';
@@ -344,22 +367,57 @@ export class VideoAnalyzer {
       } else if (!MediaRecorder.isTypeSupported('video/webm')) {
         mimeType = '';
       }
+      if (!ctx) throw new Error('No se pudo preparar el lienzo para el video de ejemplo.');
 
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       const chunks = [];
+      let intervalId;
+      let wasCancelled = false;
+      let settled = false;
+      const finishStream = () => stream.getTracks().forEach(track => track.stop());
+      const cleanUp = () => {
+        clearInterval(intervalId);
+        finishStream();
+        if (VideoAnalyzer._cancelSyntheticVideo === cancel) VideoAnalyzer._cancelSyntheticVideo = null;
+      };
+      const cancel = () => {
+        if (settled) return;
+        wasCancelled = true;
+        clearInterval(intervalId);
+        if (recorder.state === 'recording') recorder.stop();
+        else { cleanUp(); settled = true; reject(new Error('Generación del video de ejemplo cancelada.')); }
+      };
+      VideoAnalyzer._cancelSyntheticVideo = cancel;
       recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
       recorder.onstop = () => {
+        cleanUp();
+        if (wasCancelled) {
+          settled = true;
+          reject(new Error('Generación del video de ejemplo cancelada.'));
+          return;
+        }
+        if (!chunks.length) {
+          settled = true;
+          reject(new Error('El navegador no produjo datos para el video de ejemplo.'));
+          return;
+        }
         const blob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
+        settled = true;
         resolve(blob);
+      };
+      recorder.onerror = () => {
+        cleanUp();
+        settled = true;
+        reject(new Error('Falló la grabación del video sintético. Prueba con un archivo de video.'));
       };
 
       recorder.start();
 
       const startTime = performance.now();
-      const interval = setInterval(() => {
+      intervalId = setInterval(() => {
         const elapsed = (performance.now() - startTime) / 1000;
         if (elapsed >= durationSeconds) {
-          clearInterval(interval);
+          clearInterval(intervalId);
           recorder.stop();
           return;
         }
