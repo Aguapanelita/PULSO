@@ -41,8 +41,8 @@ La vista 3D utiliza Three.js y un material físico de apariencia vítrea. La esc
 Home page:
 <img width="1917" height="907" alt="image" src="https://github.com/user-attachments/assets/bee13507-b762-4c05-85c9-72b84211b411" />
 
-
-![Resultado de ejemplo: escultura 3D, metadatos, video original y controles de reproducción](docs/captura-resultado.png)
+Resultado de análisis:
+<img width="1917" height="902" alt="image" src="https://github.com/user-attachments/assets/8a7ac55b-504d-4c65-93ab-dc31f4769e07" />
 
 ### Archivos principales
 
