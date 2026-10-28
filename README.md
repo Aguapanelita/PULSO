@@ -2,8 +2,6 @@
 
 **PULSO convierte un video en una composición sonora y una escultura 3D procedural que evoluciona en el navegador.** El video se analiza localmente: no se envía a un servidor.
 
-Para probarlo localmente, sirve la carpeta del proyecto por HTTP (por ejemplo, `python -m http.server 8123`) y abre `http://localhost:8123`. Conserva `index.html`, `style.css`, `js/` y `vendor/` juntos. La aplicación necesita un navegador con módulos JavaScript, Canvas, Web Audio y WebGL; la grabación de video también depende del soporte de `MediaRecorder`.
-
 ## 1. Concepto y relación imagen-sonido
 
 La relación que propone PULSO es una **traducción audiovisual**: el video no se imita con sonidos literales ni se le asigna una banda sonora convencional. Sus variaciones de color, brillo, contraste y actividad visual se convierten en reglas musicales. La escultura 3D hace visible parte de ese mismo recorrido temporal.
