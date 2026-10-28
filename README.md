@@ -14,20 +14,6 @@ La traducción busca que se pueda escuchar la actividad que suele quedar en segu
 
 PULSO no utiliza grabaciones de theremín, handpan, guitarras, cuerdas o voces. `js/music.js` genera esos timbres en tiempo real con osciladores y procesadores de Web Audio. Por eso, la columna de procedencia distingue una síntesis propia de una muestra de audio externa.
 
-| Sonido o capa | Procedencia y autoría | Qué la activa y regla de mapeo | Licencia del sonido |
-|---|---|---|---|
-| Pad armónico / `analogPad` | Síntesis procedural de PULSO con osciladores desafinados, filtro y modulación lenta. No usa sample. El código no identifica una persona autora del preset. | Se programan acordes a intervalos de `max(2.5 s, duración/8)`. El tono dominante orienta el grado del acorde y el brillo afecta su intensidad. | No hay archivo de audio que relicenciar. La licencia del código del proyecto no está declarada: el repositorio no incluye `LICENSE`. |
-| Melodía / `theremin` | Síntesis procedural de PULSO; osciladores seno, deslizamiento de frecuencia y vibrato. No es una grabación de theremín. | Se generan eventos cuando `motion > 0.08` o `motionSpeed > 0.8`, sujetos a un intervalo mínimo. Hue y brillo orientan notas y registro; la velocidad influye en duración; movimiento en intensidad; `motionDx` en paneo; contraste en filtro. Algunas notas reciben este timbre. | Síntesis en runtime; no se incluye sample externo. Licencia del código no especificada en el repositorio. |
-| Guitarra difusa / `dreamGuitar` | Aproximación sintética de PULSO con osciladores, armónicos, chorus y delay. No hay guitarra grabada. | Se asigna a parte de los eventos melódicos según las reglas de selección de timbre; hereda altura, tiempo e intensidad del evento. | Síntesis en runtime; no se incluye sample externo. Licencia del código no especificada en el repositorio. |
-| Cuerdas frotadas / `bowedStrings` | Aproximación sintética de PULSO con osciladores, parciales y vibrato. No utiliza una grabación de violín. | Se asigna a parte de los eventos melódicos; la frecuencia y duración del evento determinan su registro y sostenimiento. | Síntesis en runtime; no se incluye sample externo. Licencia del código no especificada en el repositorio. |
-| Handpan | Síntesis procedural de PULSO con parciales sinusoidales resonantes y caída de amplitud. No es una muestra de handpan. | Se añade con separación mínima de 0.72 s cuando `motion ≥ 0.24` o `motionSpeed ≥ 0.75`. El tono dominante influye en la nota. | Síntesis en runtime; no se incluye sample externo. Licencia del código no especificada en el repositorio. |
-| Coro distante / `distantChoir` | Aproximación sintética de PULSO con capas armónicas y filtros resonantes; no hay voz humana ni coro grabado. | Se agrega a ciertos eventos de pad, con transposición y menor intensidad. | Síntesis en runtime; no se incluye sample externo. Licencia del código no especificada en el repositorio. |
-| Bajo y textura | Síntesis procedural de PULSO con osciladores y filtros. | El bajo sigue la tónica con intensidad inversa al brillo; los acentos de textura responden a picos de movimiento. | Síntesis en runtime; no se incluye sample externo. Licencia del código no especificada en el repositorio. |
-
-El tono global orienta la selección de escala: rojos/naranjas → Re dórico; amarillos → Do pentatónica mayor; verdes → Fa lidio; cian/azules → La pentatónica menor; violetas/magentas → Mi frigio. El código agrupa el hue en rangos; no realiza una transcripción armónica del audio original del video.
-
-**Licencias:** el repositorio no declara una licencia propia mediante un archivo `LICENSE`; por tanto, no debe asumirse que su código o sus presets pueden reutilizarse bajo una licencia abierta. Las bibliotecas incluidas en `vendor/` son componentes separados y conservan sus propias condiciones; revisa sus avisos antes de redistribuirlos. No se incorporan sonidos de terceros en la biblioteca actual.
-
 ## 3. Parámetros y gráfica
 
 ### Parámetros musicales
