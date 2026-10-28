@@ -38,7 +38,9 @@ La vista 3D utiliza Three.js y un material físico de apariencia vítrea. La esc
 
 **Capturas de la aplicación**
 
-![Pantalla inicial de PULSO con selección de video y acceso al ejemplo](docs/captura-inicio.png)
+Home page:
+<img width="1917" height="907" alt="image" src="https://github.com/user-attachments/assets/bee13507-b762-4c05-85c9-72b84211b411" />
+
 
 ![Resultado de ejemplo: escultura 3D, metadatos, video original y controles de reproducción](docs/captura-resultado.png)
 
