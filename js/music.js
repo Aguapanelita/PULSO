@@ -14,6 +14,18 @@ const SCALES = {
   minor_penta: [0, 3, 5, 7, 10]            // Profundo, contemplativo
 };
 
+// Biblioteca de timbres etéreos sintetizados con Web Audio: no requiere
+// archivos externos y funciona también sin conexión. Las voces originales
+// siguen sonando; estos timbres se suman como capas armónicas.
+export const SOUND_LIBRARY = Object.freeze({
+  theremin: { name: 'Theremín', character: 'sine vibrato, legato and portamento' },
+  handpan: { name: 'Handpan', character: 'inharmonic metallic partials and soft decay' },
+  analogPad: { name: 'Pad analógico', character: 'detuned oscillators and slow envelope' },
+  dreamGuitar: { name: 'Guitarra dream', character: 'soft pluck, chorus and echo' },
+  bowedStrings: { name: 'Cuerdas frotadas', character: 'bowed harmonics, swell and vibrato' },
+  distantChoir: { name: 'Coro lejano', character: 'airy formants and long reverb' }
+});
+
 export class MusicComposer {
   /**
    * Determina la tonalidad, modo y escala a partir de la paleta y características del video.
@@ -172,6 +184,31 @@ export class MusicComposer {
       }
     }
 
+    // Capas complementarias de la biblioteca etérea. Las pistas base no se
+    // reemplazan: cada copia suma un color tímbrico con menor intensidad.
+    const baseEvents = events.slice();
+    const melodicVoices = ['theremin', 'dreamGuitar', 'bowedStrings'];
+    let melodicIndex = 0;
+    for (const note of baseEvents) {
+      if (note.track === 'melody' && melodicIndex++ % 2 === 0) {
+        const voice = melodicVoices[(melodicIndex + Math.round(note.velocity * 10)) % melodicVoices.length];
+        events.push({ ...note, track: 'ethereal', voice, velocity: note.velocity * 0.27,
+          duration: Math.min(duration - note.time, Math.max(note.duration, voice === 'theremin' ? 1.05 : 0.9)) });
+      } else if (note.track === 'pad') {
+        events.push({ ...note, track: 'ethereal', voice: 'analogPad', velocity: note.velocity * 0.22 });
+        if (Math.round(note.time * 10) % 3 === 0) {
+          events.push({ ...note, track: 'ethereal', voice: 'distantChoir', midi: note.midi + 12,
+            freq: note.freq * 2, velocity: note.velocity * 0.14,
+            pan: Math.max(-0.7, Math.min(0.7, note.pan * 0.65)),
+            duration: Math.min(duration - note.time, Math.max(note.duration, 2.2)) });
+        }
+      } else if (note.track === 'bass' && Math.round(note.time * 10) % 2 === 0) {
+        events.push({ ...note, track: 'ethereal', voice: 'handpan', midi: note.midi + 12,
+          freq: note.freq * 2, velocity: note.velocity * 0.2,
+          duration: Math.min(duration - note.time, 1.7) });
+      }
+    }
+
     // Ordenar eventos cronológicamente
     events.sort((a, b) => a.time - b.time);
 
@@ -302,6 +339,10 @@ export class MusicSynthesizer {
    * Síntesis específica de una nota programada.
    */
   _scheduleNote(ctx, targetNode, note, time) {
+    if (note.voice && SOUND_LIBRARY[note.voice]) {
+      this._scheduleEtherealVoice(ctx, targetNode, note, time);
+      return;
+    }
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     const filter = ctx.createBiquadFilter();
@@ -390,6 +431,136 @@ export class MusicSynthesizer {
         if (panner) panner.disconnect();
       } catch (_) {}
     };
+  }
+
+  _scheduleEtherealVoice(ctx, targetNode, note, time) {
+    const voice = note.voice;
+    const mixer = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    const envelope = ctx.createGain();
+    const panner = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    const destination = panner || targetNode;
+    const oscillators = [];
+    const activeSources = [];
+    const cleanupNodes = [mixer, filter, envelope];
+    const duration = Math.max(0.08, note.duration || 0.8);
+    const frequency = Math.max(25, note.freq || 220);
+    const peak = Math.max(0.0001, Math.min(0.18, note.velocity * 0.3));
+    const settings = {
+      theremin: { attack: 0.24, release: 0.5, cutoff: 4200, waveform: 'sine' },
+      handpan: { attack: 0.008, release: 0.85, cutoff: 6500, waveform: 'sine' },
+      analogPad: { attack: 0.7, release: 1.1, cutoff: 2600, waveform: 'triangle' },
+      dreamGuitar: { attack: 0.012, release: 0.55, cutoff: 5200, waveform: 'triangle' },
+      bowedStrings: { attack: 0.48, release: 0.8, cutoff: 3600, waveform: 'sawtooth' },
+      distantChoir: { attack: 0.9, release: 1.25, cutoff: 3000, waveform: 'sine' }
+    }[voice];
+    const attack = Math.min(settings.attack, duration * 0.58);
+    const release = Math.min(settings.release, duration * 0.48);
+    const releaseStart = Math.max(time + attack, time + duration - release);
+    const releaseEnd = time + duration + release;
+
+    filter.type = voice === 'handpan' ? 'bandpass' : 'lowpass';
+    filter.frequency.setValueAtTime(settings.cutoff, time);
+    filter.Q.setValueAtTime(voice === 'handpan' ? 1.8 : 0.65, time);
+    envelope.gain.setValueAtTime(0.0001, time);
+    envelope.gain.linearRampToValueAtTime(peak, time + attack);
+    envelope.gain.setValueAtTime(peak, releaseStart);
+    envelope.gain.exponentialRampToValueAtTime(0.0001, releaseEnd);
+    mixer.connect(filter);
+    filter.connect(envelope);
+    envelope.connect(panner || targetNode);
+    if (panner) {
+      panner.pan.setValueAtTime(Math.max(-1, Math.min(1, note.pan || 0)), time);
+      panner.connect(targetNode);
+    }
+
+    const addTone = (ratio, level, waveform = settings.waveform, detune = 0, glide = false) => {
+      const osc = ctx.createOscillator();
+      const layer = ctx.createGain();
+      osc.type = waveform;
+      const targetFreq = frequency * ratio;
+      osc.frequency.setValueAtTime(glide ? targetFreq * 0.965 : targetFreq, time);
+      if (glide) osc.frequency.linearRampToValueAtTime(targetFreq, time + Math.min(0.35, attack + 0.08));
+      osc.detune.setValueAtTime(detune, time);
+      layer.gain.setValueAtTime(level, time);
+      osc.connect(layer);
+      layer.connect(mixer);
+      osc.start(time);
+      osc.stop(releaseEnd + 0.03);
+      oscillators.push(osc);
+      activeSources.push({ source: osc, layer });
+      return osc;
+    };
+
+    if (voice === 'theremin') {
+      const lead = addTone(1, 0.68, 'sine', 0, true);
+      addTone(1.0025, 0.2, 'sine', 0, true);
+      const vibrato = ctx.createOscillator();
+      const depth = ctx.createGain();
+      vibrato.frequency.setValueAtTime(4.7, time);
+      depth.gain.setValueAtTime(frequency * 0.004, time);
+      vibrato.connect(depth); depth.connect(lead.frequency);
+      vibrato.start(time); vibrato.stop(releaseEnd + 0.03);
+      oscillators.push(vibrato);
+    } else if (voice === 'handpan') {
+      addTone(1, 0.72, 'sine');
+      addTone(2.71, 0.24, 'sine', 4);
+      addTone(4.16, 0.12, 'sine', -3);
+      addTone(5.43, 0.06, 'sine', 2);
+    } else if (voice === 'analogPad') {
+      addTone(0.5, 0.38, 'triangle', -7);
+      addTone(1, 0.43, 'sawtooth', 5);
+      addTone(1.005, 0.27, 'triangle', 11);
+    } else if (voice === 'dreamGuitar') {
+      addTone(1, 0.66, 'triangle', -3);
+      addTone(2.004, 0.18, 'sine', 4);
+      addTone(3.01, 0.07, 'sine', -5);
+    } else if (voice === 'bowedStrings') {
+      addTone(0.5, 0.22, 'triangle', -4);
+      addTone(1, 0.58, 'sawtooth', 3);
+      addTone(2, 0.16, 'triangle', 6);
+      const vibrato = ctx.createOscillator();
+      const depth = ctx.createGain();
+      vibrato.frequency.setValueAtTime(5.2, time);
+      depth.gain.setValueAtTime(frequency * 0.002, time);
+      vibrato.connect(depth); depth.connect(oscillators[1].frequency);
+      vibrato.start(time); vibrato.stop(releaseEnd + 0.03);
+      oscillators.push(vibrato);
+    } else { // coro lejano
+      addTone(0.5, 0.22, 'sine', -7);
+      addTone(1, 0.46, 'sine', 3);
+      addTone(1.5, 0.2, 'triangle', 8);
+      addTone(2, 0.09, 'sine', -2);
+    }
+
+    if (voice === 'dreamGuitar') {
+      const echo = ctx.createDelay(1.2);
+      const wet = ctx.createGain();
+      echo.delayTime.setValueAtTime(0.34, time);
+      wet.gain.setValueAtTime(0.22, time);
+      envelope.connect(echo);
+      echo.connect(wet);
+      wet.connect(panner || targetNode);
+      cleanupNodes.push(echo, wet);
+    }
+
+    if (panner) cleanupNodes.push(panner);
+    let remainingSources = oscillators.length;
+    for (const source of oscillators) {
+      this.activeNodes.push(source);
+      source.onended = () => {
+        const index = this.activeNodes.indexOf(source);
+        if (index !== -1) this.activeNodes.splice(index, 1);
+        try { source.disconnect(); } catch (_) {}
+        remainingSources--;
+        if (remainingSources === 0) {
+          try {
+            for (const item of activeSources) item.layer.disconnect();
+            cleanupNodes.forEach(node => node.disconnect());
+          } catch (_) {}
+        }
+      };
+    }
   }
 
   /**
