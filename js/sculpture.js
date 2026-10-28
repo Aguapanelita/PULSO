@@ -258,114 +258,155 @@ export class ProceduralSculpture {
    */
   _buildInterpretiveForm(score, analysis) {
     const samples = analysis.samples || [];
+    const events = score.events || [];
     if (!samples.length) return;
+
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const palette = analysis.globalPalette?.length
-      ? analysis.globalPalette.map(c => new THREE.Color(c.hex))
+      ? analysis.globalPalette.map(item => new THREE.Color(item.hex))
       : [new THREE.Color(0xc66b9c), new THREE.Color(0xe7c9df), new THREE.Color(0x8265a8)];
-    this.ambientShapes.forEach((s, i) => s.mesh.material.color.lerp(palette[i % palette.length], 0.45));
-
-    // Seed de los datos reales: imágenes y partituras distintas producen gramáticas distintas.
-    let seed = 2166136261;
-    samples.forEach((s, i) => {
-      seed = Math.imul(seed ^ Math.round((s.motion || 0) * 1000 + (s.contrast || 0) * 97 + i), 16777619);
-      (s.motionGrid || []).forEach(v => { seed = Math.imul(seed ^ Math.round(v * 10000), 16777619); });
+    this.ambientShapes.forEach((item, i) => {
+      if (item.mesh.material?.color) item.mesh.material.color.lerp(palette[i % palette.length], 0.4);
     });
-    score.events.forEach(e => { seed = Math.imul(seed ^ Math.round((e.time || 0) * 100 + (e.midi || 0)), 16777619); });
-    let rng = seed >>> 0 || 1;
-    const random = () => { rng ^= rng << 13; rng ^= rng >>> 17; rng ^= rng << 5; return (rng >>> 0) / 4294967296; };
-    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-    const mean = key => samples.reduce((sum, s) => sum + (s[key] || 0), 0) / samples.length;
-    const motion = mean('motion'), contrast = mean('contrast');
-    const aspect = clamp((analysis.width || 1) / (analysis.height || 1), 0.55, 1.8);
-    const paletteColor = i => palette[i % palette.length].clone().lerp(palette[Math.floor(random() * palette.length)], 0.2);
-    const material = (color, solid = false) => new THREE.MeshPhysicalMaterial({ color,
-      transmission: solid ? 0.04 : 0.22 + random() * 0.45, roughness: 0.1 + random() * 0.2,
-      metalness: 0.04 + random() * 0.16, ior: 1.45 + random() * 0.12,
-      clearcoat: 0.95, clearcoatRoughness: 0.06, transparent: true,
-      opacity: 0.87 + random() * 0.13, side: THREE.DoubleSide });
-    const add = (geom, color, kind, born, end, position) => {
-      geom.setDrawRange(0, 0);
-      const mesh = new THREE.Mesh(geom, material(color, kind.includes('filament') || kind.includes('strut')));
-      if (position) mesh.position.copy(position);
-      const targetScale = mesh.scale.clone();
-      if (kind === 'cell' || kind === 'porous-node') mesh.scale.setScalar(0.0001);
-      this.sculptureGroup.add(mesh);
-      this.elements.push({ type: 'procedural', strategy: kind, geom, mesh,
-        totalCount: geom.index ? geom.index.count : geom.attributes.position.count,
-        birthTime: born, growDuration: Math.max(0.25, end - born), targetScale });
-      return mesh;
-    };
-    const tube = (points, radius, color, kind, born, end) => {
-      if (points.length < 3) return;
-      add(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), Math.max(18, points.length * 4), radius, 7, false), color, kind, born, end);
-    };
-    const anchorAt = s => {
-      const grid = s.motionGrid || []; let total = 0, x = 0, y = 0;
-      grid.forEach((v, i) => { total += v; x += ((i % 4) / 3 - 0.5) * v; y += (Math.floor(i / 4) / 3 - 0.5) * v; });
-      if (total) { x /= total; y /= total; } else { x = s.motionDx || 0; y = -(s.motionDy || 0); }
-      return new THREE.Vector3(x * 0.75, y * 0.65, (random() - 0.5) * 0.3);
-    };
-    const branch = (root, direction, length, depth, color, born, end) => {
-      const points = [root.clone()]; let tip = root.clone(), axis = direction.clone().normalize();
-      for (let j = 0; j < 5; j++) { axis.add(new THREE.Vector3(random() - 0.5, random() - 0.5, random() - 0.5)).normalize(); tip = tip.clone().addScaledVector(axis, length / 5); points.push(tip); }
-      tube(points, 0.014 + length * 0.014, color, 'branch', born, end);
-      if (depth) for (let j = 0, n = 1 + Math.floor(random() * 2); j < n; j++) branch(tip,
-        axis.clone().add(new THREE.Vector3(random() - 0.5, random() - 0.5, random() - 0.5)), length * (0.45 + random() * 0.2), depth - 1, color.clone().lerp(paletteColor(j), 0.2), born, end);
+
+    // A single watertight, tapered surface grows from its foot to its crown.
+    // Video motion steers its stem; pitch, density and velocity sculpt its folds.
+    const rings = 192;
+    const radialSegments = 56;
+    const positions = [];
+    const colors = [];
+    const indices = [];
+    const height = 4.0;
+    let driftX = (samples[0].motionDx || 0) * 0.12;
+    let driftZ = -(samples[0].motionDy || 0) * 0.1;
+    let twist = 0;
+    let previousU = 0;
+    const mean = key => samples.reduce((sum, sample) => sum + (sample[key] || 0), 0) / samples.length;
+    const averageMotion = mean('motion');
+    const aspect = clamp((analysis.width || 1) / Math.max(1, analysis.height || 1), 0.55, 1.8);
+    const bottomCenter = (rings + 1) * (radialSegments + 1);
+    const topCenter = bottomCenter + 1;
+    let bottomPoint = null, topPoint = null;
+
+    positions.length = (rings + 1) * (radialSegments + 1) * 3;
+    colors.length = positions.length;
+    const colorFor = (u, index) => {
+      const sample = samples[index];
+      const base = new THREE.Color(sample.dominantColor?.hex || '#c66b9c');
+      const pearl = palette[(index + Math.floor(u * 3)) % palette.length];
+      return base.lerp(pearl, 0.16).multiplyScalar(0.88 + (sample.brightness || 0.5) * 0.22);
     };
 
-    let drift = new THREE.Vector3((random() - 0.5) * 0.4, (random() - 0.5) * 0.4, (random() - 0.5) * 0.3);
-    const hop = Math.max(1, Math.floor(samples.length / clamp(8 + score.events.length / Math.max(1, this.duration), 8, 20)));
-    for (let i = 0; i < samples.length; i += hop) {
-      const s = samples[i], activity = clamp((s.motion || 0) * 1.7 + (s.motionSpeed || 0) * 0.04, 0, 1);
-      const born = s.time || i / samples.length * this.duration;
-      const end = Math.max(born + 0.25, samples[Math.min(samples.length - 1, i + hop)]?.time || this.duration);
-      const notesHere = score.events.filter(e => e.time >= born && e.time < end).length;
-      const complexity = clamp(0.2 + activity * 0.7 + contrast * 0.3 + Math.min(0.2, notesHere * 0.025), 0.2, 1);
-      drift.addScaledVector(anchorAt(s), 0.12 + activity * 0.2).multiplyScalar(0.88).clampLength(0, 0.8);
-      const origin = drift.clone(), color = new THREE.Color(s.dominantColor?.hex || paletteColor(i).getHex());
-      const axis = new THREE.Vector3((s.motionDx || 0.35) + (random() - 0.5) * 0.6,
-        -(s.motionDy || 0.2) + (random() - 0.5) * 0.6, random() - 0.5).normalize();
-      const grammar = random();
-      // Open grammar: every temporal region chooses a structure and parameters from its visual field.
-      if (grammar < 0.24 + activity * 0.1) {
-        for (let n = 0; n < 1 + Math.floor(complexity * 2); n++) branch(origin.clone().add(new THREE.Vector3(random() - 0.5, random() - 0.5, random() - 0.5).multiplyScalar(0.3)), axis, 0.35 + complexity * 0.65, 1 + Math.floor(random() * 2), color, born, end);
-      } else if (grammar < 0.45) {
-        // Interwoven filaments with changing pitch and radius.
-        const side = new THREE.Vector3().crossVectors(axis, new THREE.Vector3(0, 0, 1)).normalize(); if (side.lengthSq() < 0.1) side.set(1, 0, 0);
-        const up = new THREE.Vector3().crossVectors(axis, side).normalize();
-        for (let n = 0, count = 2 + Math.floor(complexity * 4); n < count; n++) {
-          const points = [], phase = random() * 6.28, turns = 0.6 + random() * (1 + activity * 2);
-          for (let j = 0; j <= 20; j++) { const u = j / 20, a = phase + u * 6.28 * turns, r = 0.12 + complexity * 0.35 + Math.sin(u * Math.PI) * 0.16;
-            points.push(origin.clone().addScaledVector(axis, (u - 0.5) * 0.9).addScaledVector(side, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r)); }
-          tube(points, 0.012 + random() * 0.025, paletteColor(n), 'filament-helix', born, end);
-        }
-      } else if (grammar < 0.66) {
-        // Cohesive cellular clusters, linked by short tendons.
-        const points = [], count = 3 + Math.floor(complexity * 7);
-        for (let n = 0; n < count; n++) { const p = origin.clone().add(new THREE.Vector3((random() - 0.5) * 0.9, (random() - 0.5) * 0.65, (random() - 0.5) * 0.7)); points.push(p);
-          add(new THREE.IcosahedronGeometry(0.07 + random() * (0.1 + complexity * 0.12), random() > 0.75 ? 2 : 1), paletteColor(n), 'cell', born, end, p); }
-        for (let n = 1; n < Math.min(points.length, 5); n++) tube([points[0], points[0].clone().lerp(points[n], 0.5), points[n]], 0.014, color, 'tendon', born, end);
-      } else if (grammar < 0.84) {
-        // Folded, indexed membrane whose silhouette follows local direction.
-        const rows = 26, cols = 9, vertices = [], indices = [];
-        const side = new THREE.Vector3().crossVectors(axis, new THREE.Vector3(0, 0, 1)).normalize(); if (side.lengthSq() < 0.1) side.set(1, 0, 0);
-        const up = new THREE.Vector3().crossVectors(axis, side).normalize();
-        for (let r = 0; r <= rows; r++) for (let c = 0; c <= cols; c++) { const u = r / rows, v = c / cols * 2 - 1, w = Math.sin(Math.PI * u) * (0.22 + complexity * 0.3), fold = Math.sin(u * 8 + v * 3 + random() * 0.02) * 0.13;
-          const p = origin.clone().addScaledVector(axis, (u - 0.5) * 1.1).addScaledVector(side, v * w).addScaledVector(up, fold); vertices.push(p.x, p.y, p.z);
-          if (r < rows && c < cols) { const a = r * (cols + 1) + c, b = a + cols + 1; indices.push(a, b, a + 1, b, b + 1, a + 1); } }
-        const geom = new THREE.BufferGeometry(); geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3)); geom.setIndex(indices); geom.computeVertexNormals(); add(geom, color, 'membrane', born, end);
-      } else {
-        // Porous web from irregular nodes and locally connected struts.
-        const nodes = []; for (let n = 0, count = 4 + Math.floor(complexity * 5); n < count; n++) { const a = random() * 6.28, r = 0.2 + random() * 0.5, p = origin.clone().add(new THREE.Vector3(Math.cos(a) * r, (random() - 0.5) * 0.6, Math.sin(a) * r)); nodes.push(p); add(new THREE.IcosahedronGeometry(0.05 + random() * 0.08, 1), paletteColor(n), 'porous-node', born, end, p); }
-        nodes.forEach((p, n) => { const q = nodes[(n + 1 + Math.floor(random() * Math.max(1, nodes.length - 1))) % nodes.length]; tube([p, p.clone().lerp(q, 0.5), q], 0.012 + random() * 0.014, color, 'porous-strut', born, end); });
+    for (let ring = 0; ring <= rings; ring++) {
+      const u = ring / rings;
+      const sampleIndex = Math.min(samples.length - 1, Math.floor(u * (samples.length - 1)));
+      const sample = samples[sampleIndex];
+      const time = u * this.duration;
+      const motion = clamp(sample.motion || 0, 0, 1);
+      const windowTime = this.duration / rings * 3.2;
+      let eventEnergy = 0, pitch = 60, pitchWeight = 0, noteCount = 0;
+      for (const event of events) {
+        const delta = Math.abs(event.time - time);
+        if (delta > windowTime) continue;
+        const weight = (1 - delta / windowTime) * (event.velocity || 0.25);
+        eventEnergy += weight;
+        pitch += ((event.midi || 60) - 60) * weight;
+        pitchWeight += weight;
+        noteCount++;
       }
-      if (activity > 0.42 && random() < activity * 0.5) branch(origin, axis, 0.45 + activity * 0.4, 1, color, born, end);
-    }
-    this.sculptureGroup.scale.set(aspect >= 1 ? 1 : 0.72 + aspect * 0.28, aspect < 1 ? 1 : 0.72 + (1 / aspect) * 0.28, 0.82 + motion * 0.2);
-    this.sculptureGroup.rotation.set((random() - 0.5) * 0.6, (random() - 0.5) * 0.7, (random() - 0.5) * 0.6);
-    this.sculptureGroup.position.copy(drift);
-  }
+      const meanPitch = pitchWeight > 0 ? 60 + (pitch - 60) / pitchWeight : 60;
+      const pitchClass = ((meanPitch % 12) + 12) % 12;
+      const resonance = clamp(eventEnergy, 0, 1.6);
+      const motionX = sample.motionDx || 0;
+      const motionY = sample.motionDy || 0;
+      const grid = sample.motionGrid || [];
+      let gridTotal = 0, gridX = 0, gridY = 0;
+      grid.forEach((value, i) => {
+        gridTotal += value;
+        gridX += ((i % 4) / 3 - 0.5) * value;
+        gridY += (Math.floor(i / 4) / 3 - 0.5) * value;
+      });
+      if (gridTotal > 0) { gridX /= gridTotal; gridY /= gridTotal; }
+      const step = u - previousU;
+      driftX = clamp(driftX + (motionX * 0.7 + gridX * 0.3) * motion * step * 1.8, -0.78, 0.78);
+      driftZ = clamp(driftZ + (-motionY * 0.7 - gridY * 0.3) * motion * step * 1.45, -0.66, 0.66);
+      twist += step * (1.25 + pitchClass * 0.1 + motion * 0.9);
+      previousU = u;
 
+      const taper = Math.pow(Math.max(0.0005, Math.sin(Math.PI * u)), 0.72);
+      const pulse = Math.sin(u * Math.PI * (2.2 + (sample.motionSpeed || 0) * 0.08) + pitchClass * 0.24);
+      const bodyRadius = (0.07 + 0.62 * taper) * (1 + motion * 0.16 + resonance * 0.09 + pulse * 0.075);
+      const centerX = driftX + Math.sin(u * Math.PI * 1.7 + twist * 0.32) * (0.05 + motion * 0.12);
+      const centerZ = driftZ + Math.cos(u * Math.PI * 1.25 - twist * 0.27) * (0.045 + resonance * 0.07);
+      const y = -height * 0.5 + height * u + Math.sin(twist * 0.65) * 0.09;
+      if (ring === 0) bottomPoint = new THREE.Vector3(centerX, y, centerZ);
+      if (ring === rings) topPoint = new THREE.Vector3(centerX, y, centerZ);
+
+      const color = colorFor(u, sampleIndex);
+      for (let side = 0; side <= radialSegments; side++) {
+        const angle = (side / radialSegments) * Math.PI * 2;
+        const lobeCount = 3.2 + (pitchClass / 12) * 2.4 + Math.min(1.3, noteCount * 0.1);
+        const folds = 1
+          + Math.sin(angle * lobeCount + twist) * (0.12 + motion * 0.07 + resonance * 0.055)
+          + Math.sin(angle * (lobeCount + 2.1) - twist * 0.72) * (0.055 + (sample.contrast || 0) * 0.045)
+          + Math.cos(angle * 2 - twist * 0.43) * 0.035;
+        const radius = Math.max(0.035, bodyRadius * folds);
+        const vertex = (ring * (radialSegments + 1) + side) * 3;
+        positions[vertex] = centerX + Math.cos(angle) * radius * (aspect >= 1 ? 1.12 : 0.92);
+        positions[vertex + 1] = y + Math.sin(angle * 2 + twist) * motion * 0.035;
+        positions[vertex + 2] = centerZ + Math.sin(angle) * radius;
+        const colorIndex = vertex;
+        colors[colorIndex] = color.r;
+        colors[colorIndex + 1] = color.g;
+        colors[colorIndex + 2] = color.b;
+
+        if (ring < rings && side < radialSegments) {
+          const a = ring * (radialSegments + 1) + side;
+          const b = a + radialSegments + 1;
+          indices.push(a, b, a + 1, b, b + 1, a + 1);
+        }
+      }
+    }
+
+    // Both ends are capped into this same indexed surface, so the sculpture
+    // is one solid mesh rather than a group of floating pieces.
+    positions.push(bottomPoint.x, bottomPoint.y, bottomPoint.z, topPoint.x, topPoint.y, topPoint.z);
+    colors.push(0.86, 0.72, 0.82, 0.92, 0.8, 0.9);
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+    const material = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff, vertexColors: true,
+      transmission: 0.18, roughness: 0.17, metalness: 0.12,
+      ior: 1.46, clearcoat: 1, clearcoatRoughness: 0.055,
+      transparent: true, opacity: 0.97, side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    this.sculptureGroup.add(mesh);
+    const capIndices = radialSegments * 3;
+    const sideIndices = rings * radialSegments * 6;
+    const sideFaces = indices.splice(0);
+    const bottomFaces = [];
+    const topFaces = [];
+    for (let side = 0; side < radialSegments; side++) {
+      bottomFaces.push(bottomCenter, side, side + 1);
+      const topRing = rings * (radialSegments + 1) + side;
+      topFaces.push(topCenter, topRing + 1, topRing);
+    }
+    indices.push(...bottomFaces, ...sideFaces, ...topFaces);
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+    this.elements.push({
+      type: 'solid', strategy: 'single-growing-surface', geom: geometry, mesh,
+      totalCount: indices.length, ringCount: rings, indicesPerRing: radialSegments * 6,
+      bottomCapIndices: capIndices, sideIndices, topCapStart: capIndices + sideIndices
+    });
+
+    this.sculptureGroup.position.set(0, 0, 0);
+    this.sculptureGroup.scale.set(1, 1, 1);
+    this.sculptureGroup.rotation.set(0, 0, 0);
+  }
   updateGrowth(time) {
     this.currentTime = Math.max(0, Math.min(this.duration, time));
     const progress = (this.duration > 0) ? (this.currentTime / this.duration) : 1.0;
@@ -373,7 +414,13 @@ export class ProceduralSculpture {
     for (let i = 0; i < this.elements.length; i++) {
       const el = this.elements[i];
 
-      if (el.type === 'procedural') {
+      if (el.type === 'solid') {
+        const visibleRings = Math.floor(progress * el.ringCount);
+        const sideCount = Math.min(el.sideIndices, visibleRings * el.indicesPerRing);
+        const topCap = progress >= 1 ? el.bottomCapIndices : 0;
+        el.geom.setDrawRange(0, el.bottomCapIndices + sideCount + topCap);
+        el.mesh.visible = progress > 0.001;
+      } else if (el.type === 'procedural') {
         const elapsed = this.currentTime - el.birthTime;
         if (elapsed < 0) {
           el.mesh.visible = false;
