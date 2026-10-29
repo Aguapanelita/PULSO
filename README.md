@@ -1,18 +1,18 @@
 # PULSO
 
-**PULSO convierte un video en una composición sonora y una escultura 3D procedural que evoluciona en el navegador.** El video se analiza localmente: no se envía a un servidor.
+PULSO es una plataforma audiovisual experimental que transforma videos en composiciones sonoras mediante el análisis de sus colores y movimientos, generando esculturas 3D evolutivas.
 
 ## 1. Concepto y relación imagen-sonido
 
 La relación que propone PULSO es una **traducción audiovisual**: el video no se imita con sonidos literales ni se le asigna una banda sonora convencional. Sus variaciones de color, brillo, contraste y actividad visual se convierten en reglas musicales. La escultura 3D hace visible parte de ese mismo recorrido temporal.
 
-El sistema muestrea el video con un canvas de análisis de 128 × 72 píxeles. En cada muestra calcula luminancia, contraste, color promedio, un tono dominante estimado y diferencias de luminancia respecto del fotograma anterior. Es una lectura abstracta de la imagen; no reconoce objetos, personas ni el significado de la escena.
+El sistema muestrea el video con un canvas de análisis donde calcula luminancia, contraste, color promedio, un tono dominante estimado y diferencias de luminancia respecto del fotograma anterior. Es una lectura abstracta de la imagen; no reconoce objetos, personas ni el significado de la escena.
 
-La traducción busca que se pueda escuchar la actividad que suele quedar en segundo plano: cambios de intensidad, pausas, transiciones cromáticas y desplazamiento aproximado. Las pausas reducen la actividad de algunas capas; cambios de tono pueden modificar la escala; el movimiento puede afectar la densidad, la articulación y el paneo. Son correspondencias algorítmicas, no equivalencias universales entre un color y una emoción.
+La traducción busca que se pueda escuchar la actividad que suele quedar en segundo plano: cambios de intensidad, pausas, transiciones cromáticas y desplazamiento aproximado. Las pausas reducen la actividad de algunas capas; cambios de tono pueden modificar la escala; el movimiento puede afectar la densidad, la articulación y el paneo.
 
 ## 2. Banco de sonidos y disparador
 
-PULSO no utiliza grabaciones de theremín, handpan, guitarras, cuerdas o voces. `js/music.js` genera esos timbres en tiempo real con osciladores y procesadores de Web Audio. Por eso, la columna de procedencia distingue una síntesis propia de una muestra de audio externa.
+PULSO usa `js/music.js` para generar "timbres" en tiempo real con osciladores y procesadores de Web Audio. Por eso, la columna de procedencia distingue una síntesis propia de una muestra de audio externa.
 
 ## 3. Parámetros y gráfica
 
@@ -22,17 +22,17 @@ No hay controles en la interfaz para editar directamente los parámetros del sin
 
 | Rasgo visual | Parámetro musical afectado | Por qué se usa |
 |---|---|---|
-| Hue dominante | Escala, grado y selección de notas | Mantiene una relación cromática consistente a lo largo de la composición. |
+| Color dominante | Escala, grado y selección de notas | Mantiene una relación cromática consistente a lo largo de la composición. |
 | Brillo medio | Registro y velocidad/intensidad de algunas capas | Traduce una diferencia global de luminancia sin analizar semánticamente la escena. |
 | Movimiento entre fotogramas | Densidad de eventos, duración e intensidad de melodía y acentos | Hace que periodos activos tengan más articulación que periodos quietos. |
 | Centro aproximado de píxeles cambiantes (`motionDx`) | Paneo estéreo | Da una dimensión espacial sencilla al desplazamiento detectado. |
 | Contraste | Frecuencia de corte del filtro | Vincula la variación tonal del fotograma con el brillo tímbrico. |
 
-El movimiento se estima mediante diferencias de luminancia entre fotogramas, no mediante optical flow. `motionDx` y `motionDy` son centros ponderados de los píxeles que cambiaron, así que pueden reaccionar a flashes o cortes como si fueran desplazamiento.
+El movimiento se estima mediante diferencias de luminancia entre fotogramas. `motionDx` y `motionDy` son centros ponderados de los píxeles que cambiaron, así que pueden reaccionar a flashes o cortes como si fueran desplazamiento.
 
 ### Decisiones gráficas
 
-La interfaz usa fondo oscuro, violeta y magenta, tipografía sans serif con detalles monoespaciados, paneles translúcidos y reflejos. Esta identidad enmarca el resultado como una experiencia de escucha y observación; **no codifica el color de la interfaz como si fuera la paleta del video**. Los colores aplicados a los anillos de la escultura proceden de las muestras analizadas, mediante un tono dominante estimado y valores promedio.
+La interfaz usa fondo oscuro, violeta y magenta, tipografía sans serif con detalles monoespaciados, paneles translúcidos, reflejos y objetos 3D. Esta identidad enmarca el resultado como una experiencia de escucha y observación.
 
 La vista 3D utiliza Three.js y un material físico de apariencia vítrea. La escultura final se construye como **una sola superficie tubular indexada**, desarrollada por anillos a lo largo del tiempo. Movimiento, distribución espacial, contraste, tono y eventos musicales modifican su curvatura, grosor, pliegues y color. Es una forma conectada, pero la implementación actual no genera ramificaciones topológicas; además, mantiene una tendencia de crecimiento vertical.
 
@@ -59,11 +59,15 @@ Resultado de análisis:
 
 ## 4. Reflexión y mejoras
 
-Traducir imagen a sonido hizo evidente que una misma secuencia contiene muchas señales posibles, pero el sistema solo escucha las que su análisis puede medir. La diferencia de luminancia puede dar ritmo e intensidad, aunque no explica qué se mueve ni por qué. El hue global puede orientar una escala, pero no conserva todos los colores ni descubre una armonía “correcta”. La síntesis evoca timbres etéreos, pero no reemplaza la expresividad de instrumentos y voces reales.
+Traducir imagen a sonido hizo evidente que una misma secuencia contiene muchas señales posibles, pero el sistema solo escucha las que su análisis puede medir. La diferencia de luminancia puede dar ritmo e intensidad, aunque no explica qué se mueve ni por qué. El color dominante puede orientar una escala, pero no conserva todos los colores ni descubre una armonía “correcta” los usa en el modelo 3D a medida que los fotogramas avanzan.
 
 Quedan fuera del sistema actual, entre otras cosas, el contenido semántico de las escenas, la profundidad real de la imagen, el movimiento óptico preciso, las diferencias de timbre de una grabación auténtica y los cambios cromáticos dentro de una misma zona del fotograma. La escultura registra muestras en sus anillos, pero su topología es una trayectoria tubular y no una estructura ramificada libre.
 
 **Mejoras concretas propuestas:**
 
 1. **Incorporar optical flow y muestreo cromático por regiones.** Sustituir el centro aproximado de cambios de luminancia por vectores de movimiento y analizar varias regiones o una paleta por fotograma. Esto reduciría falsos acentos por flashes y permitiría que dirección, zonas de color y escultura dependieran de más información visual.
-2. **Añadir controles de mapping y capas con procedencia explícita.** Permitir ajustar densidad, registro, paneo y mezcla de timbres, mostrando qué rasgo visual controla cada parámetro. Si se incorporan grabaciones reales, añadir una tabla de atribución con autor, origen y licencia por archivo de audio.
+2. **Añadir controles de mapping y capas con procedencia explícita.** Permitir ajustar densidad, registro, paneo y mezcla de timbres, mostrando qué rasgo visual controla cada parámetro. Incluso se podría potenciar la experiencia al permitir que el usuario añada una carpeta de sonidos con la que desee experimentar.
+
+---
+
+With luv Yuri~ 🌸
